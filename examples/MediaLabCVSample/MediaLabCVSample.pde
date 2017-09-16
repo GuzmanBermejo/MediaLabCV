@@ -25,6 +25,10 @@ int[] colors = new int[]{
 };
 
 
+float resizeCoeff = 1.0f;
+int videoWidth = 0;
+int videoHeight = 0;
+
 void setup() {
   //size(1920, 960);
   
@@ -52,19 +56,32 @@ void draw() {
   
   background(200);
   
-  image(video, video.width, 0);
-  
-  image(video, video.width*2, 0);
-  
-  tracking();
-  
+  if(initTracking){
+    PImage resizedFrame = resizeFrame(video);
+    
+    image(resizedFrame, videoWidth, 0);
+    
+    image(resizedFrame, videoWidth*2, 0);
+    
+    tracking();
+  }
   
 }
 
 void movieEvent(Movie m) {
   m.read();
   if(!initTracking && video.width>0 && video.height>0){
+    println("Screen: "+width+"x"+height);
     println("Input Video: "+video.width+"x"+video.height);
+    float widthCoeff = (width/3.0f)/video.width;//3 columns
+    float heightCoeff = (height/2.0f)/video.height;//2 rows
+    resizeCoeff=min(widthCoeff, heightCoeff);
+    
+    videoWidth = (int)(video.width * resizeCoeff);//Truncate
+    videoHeight = (int)(video.height * resizeCoeff);//Truncate
+
+    
+    println("Resize Factor: "+resizeCoeff);
     resetMediaLabCV();
     initTracking = true;
   }
@@ -77,6 +94,8 @@ void resetMediaLabCV(){
     startBG();
     
 }
+
+
 
 void initMediaLabCV(){
   
@@ -106,19 +125,19 @@ void setROI(){
 }
 
 void tracking(){
-  if(initTracking){
+  
       
     //Send the frame to MediaLabCV
     mediacv.setInput(video);
     
     //Display received frame to ensure correctness
-    image(mediacv.getInput(), 0, 0);
+    image(resizeFrame(mediacv.getInput()), 0, 0);
     
     //Draw Roi
     noFill();
     strokeWeight(2);
     stroke(0,255,255);
-    rect(roiX.getValueI(), roiY.getValueI(), roiWidth.getValueI(), roiHeight.getValueI());
+    rect(roiX.getValueI()*resizeCoeff, roiY.getValueI()*resizeCoeff, roiWidth.getValueI()*resizeCoeff, roiHeight.getValueI()*resizeCoeff);
   
 
 
@@ -134,15 +153,15 @@ void tracking(){
     //Remove noise
     int noiseSize = morphNoiseSize.getValueI();
     if(noiseSize>0) mediacv.erode(noiseSize,1);
-    image(mediacv.getOutput(), 0, video.height);
+    image(resizeFrame(mediacv.getOutput()), 0, videoHeight);
     
     
     //Asymmetric closing
     mediacv.dilate(dilateKernelSize.getValueI(),dilateIterations.getValueI());
-    image(mediacv.getOutput(), video.width, video.height);
+    image(resizeFrame(mediacv.getOutput()), videoWidth, videoHeight);
     
     mediacv.erode(erodeKernelSize.getValueI(),erodeIterations.getValueI());
-    image(mediacv.getOutput(), video.width*2, video.height);
+    image(resizeFrame(mediacv.getOutput()), videoWidth*2, videoHeight);
     
     //Default detections
     
@@ -151,7 +170,7 @@ void tracking(){
     stroke(0, 0, 255);
     for(int i=0; i< boundingBoxes.length;i++) {
         Rectangle rect = boundingBoxes[i];
-        rect(rect.x, rect.y, rect.width, rect.height);
+        rect(rect.x*resizeCoeff, rect.y*resizeCoeff, rect.width*resizeCoeff, rect.height*resizeCoeff);
     }
     
     //Polygon
@@ -178,10 +197,10 @@ void tracking(){
     for(int i=0; i< boundingBoxes.length;i++) {
         Rectangle rect = boundingBoxes[i];
         noFill();
-        rect(rect.x+video.width, rect.y, rect.width, rect.height);
+        rect(rect.x*resizeCoeff+videoWidth, rect.y*resizeCoeff, rect.width*resizeCoeff, rect.height*resizeCoeff);
         
         fill(255);
-        text(i, rect.x+video.width, rect.y);
+        text(i, rect.x*resizeCoeff+videoWidth, rect.y*resizeCoeff);
     }
     
     //Tracking
@@ -192,12 +211,12 @@ void tracking(){
       stroke(colors[i%colors.length]);
       
       Rectangle rect = node[i];
-      ellipse(rect.x+video.width*2, rect.y, rect.width, rect.height);
+      ellipse(rect.x*resizeCoeff+videoWidth*2, rect.y*resizeCoeff, rect.width*resizeCoeff, rect.height*resizeCoeff);
       fill(0);
-      text(i, rect.x+video.width*2, rect.y);
+      text(i, rect.x*resizeCoeff+videoWidth*2, rect.y*resizeCoeff);
     }
     
-  }
+  
 }
 
 /*************
@@ -235,7 +254,7 @@ void setContourSizes(){
 void paintPolygon(Polygon poly){
     beginShape();
     for(int n=0;n<poly.npoints;n++){
-      vertex(poly.xpoints[n], poly.ypoints[n]);
+      vertex(poly.xpoints[n]*resizeCoeff, poly.ypoints[n]*resizeCoeff);
     }
     endShape(CLOSE);
 }
@@ -245,4 +264,10 @@ void printBoundingBoxes(Rectangle [] boundingBoxes){
           println("new Rectangle("+rect.x+","+rect.y+","+rect.width+","+rect.height+"),");
   }
   println("-----------------------");
+}
+
+PImage resizeFrame(PImage p){
+  PImage dup = p.copy();
+  dup.resize(videoWidth, videoHeight);
+  return dup;
 }

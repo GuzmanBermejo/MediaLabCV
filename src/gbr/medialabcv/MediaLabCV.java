@@ -15,9 +15,12 @@ import java.awt.*;
 import java.awt.geom.RectangularShape;
 
 import java.io.*;
+import java.lang.reflect.Field;
+import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
+import java.nio.file.Paths;
 import java.util.*;
 
 
@@ -813,16 +816,34 @@ public class MediaLabCV {
      *******************/
 
     private static boolean isNativeLoaded = false;
+    private static final String LIBRARY_ROOT = "/lib/opencv";
+    private static final String LIBRARY_FILE_LIST = LIBRARY_ROOT+"/list.txt";
+    private static final String DESTINATION_DIRECTORY = "opencv_native";
 
     //Load library
     private void loadNative(){
         if(!isNativeLoaded) {
+            String destinationPath ="";
+            try {
+                destinationPath = MediaLabCV.class.getProtectionDomain().getCodeSource().getLocation().getPath();
+                destinationPath = new File(destinationPath).getParentFile().getPath();
+                destinationPath = URLDecoder.decode(destinationPath, "UTF-8");
+            } catch (UnsupportedEncodingException e) {
+                e.printStackTrace();
+                destinationPath=parent.sketchPath();
+            }
+
+
+            appendLibraryPath(Paths.get(destinationPath, DESTINATION_DIRECTORY).toString());
             try {
                 System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
             } catch (UnsatisfiedLinkError e) {
                 try {
-                    System.out.println("/lib/opencv/" + System.getProperty("sun.arch.data.model") + "/" + Core.NATIVE_LIBRARY_NAME + ".dll");
-                    loadLibraryFromJar("/lib/opencv/" + System.getProperty("sun.arch.data.model") + "/" + Core.NATIVE_LIBRARY_NAME + ".dll",  parent.sketchPath());
+                    String prefix = getLibraryPrefix();
+
+                    extractLibraryFromJar(prefix, destinationPath);
+
+                    System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
                 } catch (Exception exception) {
                     throw new RuntimeException(exception);
                 }
@@ -830,48 +851,96 @@ public class MediaLabCV {
             isNativeLoaded = true;
         }
     }
-    /*static{
-
-    }*/
-
-
-    private static void loadLibraryFromJar(String inPath, String sketchPath) throws IOException {
-
-
-        //Filename
-        String[] parts = inPath.split("/");
-        String filename = parts[parts.length - 1];
-
-        File libraryFolder  = new File(sketchPath, "opencv_native");
-        libraryFolder.mkdirs();
-
-        File libraryFile  = new File(libraryFolder, filename);
-
-        if (!libraryFile.exists()) {
-
-            libraryFile.createNewFile();
-
-            InputStream is = MediaLabCV.class.getResourceAsStream(inPath);
-            if (is == null) {
-                throw new FileNotFoundException("File " + inPath + " not found.");
-            }
-
-            byte[] buffer = new byte[2048];
-            int readBytes;
-
-            OutputStream os = new FileOutputStream(libraryFile);
-            try {
-                while ((readBytes = is.read(buffer)) != -1) {
-                    os.write(buffer, 0, readBytes);
-                }
-            } finally {
-                os.close();
-                is.close();
-            }
+    private String getLibraryPrefix(){
+        String os = "";
+        switch (PApplet.platform){
+            case PConstants.WINDOWS:
+                os = "windows";
+                break;
+            case PConstants.MACOSX:
+                os = "mac";
+                break;
+            case PConstants.LINUX:
+                //TODO
+            default:
+                throw new RuntimeException("OS not supported");
         }
-        System.out.println("OpenCV stored in "+libraryFile.getAbsolutePath());
-        System.load(libraryFile.getAbsolutePath());
+        String bits = System.getProperty("sun.arch.data.model");
+        return LIBRARY_ROOT+"/"+os+"/"+bits;
     }
 
 
+    private static void extractLibraryFromJar(String prefix, String path) throws IOException {
+
+        InputStream inputStream = MediaLabCV.class.getResourceAsStream(LIBRARY_FILE_LIST);
+
+        if(inputStream==null) throw new FileNotFoundException("Library list file not found.");
+
+        BufferedReader listFile = new BufferedReader(new InputStreamReader(inputStream));
+
+        File libraryFolder  = new File(path, DESTINATION_DIRECTORY);
+        libraryFolder.mkdirs();
+
+        byte[] buffer = new byte[2048];
+
+        String fileName;
+
+        while ((fileName = listFile.readLine()) != null) {
+            if(fileName.startsWith(prefix)) {
+                //Filename
+                String[] parts = fileName.split("/");
+                String filename = parts[parts.length - 1];
+
+                File libraryFile  = new File(libraryFolder, filename);
+
+                if (!libraryFile.exists()) {
+
+                    libraryFile.createNewFile();
+
+                    InputStream is = MediaLabCV.class.getResourceAsStream(fileName);
+                    if (is == null) {
+                        throw new FileNotFoundException("File " + filename + " not found.");
+                    }
+
+                    int readBytes;
+
+                    OutputStream os = new FileOutputStream(libraryFile);
+                    try {
+                        while ((readBytes = is.read(buffer)) != -1) {
+                            os.write(buffer, 0, readBytes);
+                        }
+                    } finally {
+                        os.close();
+                        is.close();
+                    }
+                }
+            }
+        }
+
+        System.out.println("OpenCV stored in:" + Paths.get(path, DESTINATION_DIRECTORY).toString());
+
+    }
+
+
+    private void appendLibraryPath(String libraryPath) {
+
+        try {
+            final Field usrPaths = ClassLoader.class.getDeclaredField("usr_paths");
+            usrPaths.setAccessible(true);
+
+            final String[] paths = (String[]) usrPaths.get(null);
+
+            for (String path : paths) {
+                if (path.equals(libraryPath)) { //Already present
+                    return;
+                }
+            }
+
+            final String[] modifiedPaths = Arrays.copyOf(paths, paths.length + 1);
+            modifiedPaths[modifiedPaths.length - 1] = libraryPath; //Append
+            usrPaths.set(null, modifiedPaths);
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+    }
 }
